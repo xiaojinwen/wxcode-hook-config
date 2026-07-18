@@ -60,45 +60,45 @@ jobs:
 
           # 用 Python 解析 HTML 提取 APK 链接和版本号
           python3 << 'PYEOF'
-import os, re, html
+          import os, re, html
 
-with open("/tmp/wxscrape/page.html", "r", encoding="utf-8", errors="replace") as f:
-    page = f.read()
+          with open("/tmp/wxscrape/page.html", "r", encoding="utf-8", errors="replace") as f:
+              page = f.read()
 
-page = html.unescape(page)
+          page = html.unescape(page)
 
-# 提取所有 .apk 下载链接
-apk_urls = re.findall(r'https://[^"\'<> ]+\.apk', page)
+          # 提取所有 .apk 下载链接
+          apk_urls = re.findall(r'https://[^"\'> ]+\.apk', page)
 
-if not apk_urls:
-    # 尝试从其他 URL 格式提取
-    apk_urls = re.findall(r'https://[^"\'<> ]*wechat[^"\'<> ]*\.apk', page, re.I)
+          if not apk_urls:
+              # 尝试从其他 URL 格式提取
+              apk_urls = re.findall(r'https://[^"\'> ]*wechat[^"\'> ]*\.apk', page, re.I)
 
-if not apk_urls:
-    print("::warning::未找到 APK 链接，将尝试用最新已知版本")
-    apk_url = ""
-else:
-    # 优先 arm64
-    arm64_urls = [u for u in apk_urls if "arm64" in u]
-    apk_url = arm64_urls[0] if arm64_urls else apk_urls[0]
-    print(f"APK: {apk_url}")
+          if not apk_urls:
+              print("::warning::未找到 APK 链接，将尝试用最新已知版本")
+              apk_url = ""
+          else:
+              # 优先 arm64
+              arm64_urls = [u for u in apk_urls if "arm64" in u]
+              apk_url = arm64_urls[0] if arm64_urls else apk_urls[0]
+              print(f"APK: {apk_url}")
 
-# 提取版本号
-version = ""
-m = re.search(r'Android\D*(\d+\.\d+\.\d+)', page)
-if m:
-    version = m.group(1)
-if not version and apk_url:
-    m = re.search(r'(\d+\.\d+\.\d+)', apk_url)
-    if m:
-        version = m.group(1)
+          # 提取版本号
+          version = ""
+          m = re.search(r'Android\D*(\d+\.\d+\.\d+)', page)
+          if m:
+              version = m.group(1)
+          if not version and apk_url:
+              m = re.search(r'(\d+\.\d+\.\d+)', apk_url)
+              if m:
+                  version = m.group(1)
 
-print(f"版本号: {version if version else '未知'}")
+          print(f"版本号: {version if version else '未知'}")
 
-with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-    f.write(f"apk_url={apk_url}\n")
-    f.write(f"version={version}\n")
-PYEOF
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"apk_url={apk_url}\n")
+              f.write(f"version={version}\n")
+          PYEOF
 
       - name: 检查链接是否与上次提取过的一致
         id: check
