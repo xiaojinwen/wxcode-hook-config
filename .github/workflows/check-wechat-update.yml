@@ -1,0 +1,143 @@
+name: 检查微信更新并自动提取 Hook 配置
+
+on:
+  # 定时检查：每天 UTC 2:00（北京时间 10:00）
+  schedule:
+    - cron: '0 2 * * *'
+  # 也支持手动触发
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check-and-extract:
+    name: 检查更新并自动提取
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 抓取微信更新页面并提取 APK 链接
+        id: scrape
+        shell: python
+        run: |
+          import os, re, urllib.request, html
+
+          PAGE_URL = "https://weixin.qq.com/updates?platform=android"
+          print(f"抓取页面: {PAGE_URL}")
+
+          req = urllib.request.Request(
+            PAGE_URL,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; GitHubActions/1.0)"},
+          )
+          with urllib.request.urlopen(req, timeout=30) as resp:
+            page_html = resp.read().decode("utf-8", errors="replace")
+
+          # 解码 HTML 实体（如 &amp;）
+          page_html = html.unescape(page_html)
+
+          # === 提取所有 .apk 下载链接 ===
+          apk_urls = re.findall(r'https://[^"\'<> ]+\.apk', page_html)
+
+          if not apk_urls:
+            print("::error::未找到任何 APK 下载链接")
+            exit(1)
+
+          # 优先选择 arm64 版本
+          arm64_urls = [u for u in apk_urls if "arm64" in u]
+          if arm64_urls:
+            apk_url = arm64_urls[0]
+            print(f"找到 64 位 APK: {apk_url}")
+          else:
+            apk_url = apk_urls[0]
+            print(f"找到 APK（32位）: {apk_url}")
+
+          # 输出 APK 链接
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"apk_url={apk_url}\n")
+
+          # === 提取版本号 ===
+          version = ""
+
+          # 方式1：从页面文本找 "Android X.Y.Z" 或 "微信 X.Y.Z"
+          m = re.search(r'Android\D*(\d+\.\d+\.\d+)', page_html)
+          if m:
+            version = m.group(1)
+
+          # 方式2：从 APK 文件名提取
+          if not version:
+            m = re.search(r'(\d+\.\d+\.\d+)', apk_url)
+            if m:
+              version = m.group(1)
+
+          if version:
+            print(f"识别版本号: {version}")
+          else:
+            print("未识别到版本号，将由提取脚本自动检测")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"version={version}\n")
+
+      - name: 检查链接是否有变化
+        id: check
+        shell: bash
+        run: |
+          LAST_URL=""
+          if [ -f ".last_apk_url" ]; then
+            LAST_URL=$(cat .last_apk_url)
+            echo "上次记录的链接: $LAST_URL"
+          else
+            echo "首次运行，无历史记录"
+          fi
+
+          CURRENT_URL="${{ steps.scrape.outputs.apk_url }}"
+          echo "当前最新链接: $CURRENT_URL"
+
+          if [ "$LAST_URL" = "$CURRENT_URL" ]; then
+            echo "链接无变化，跳过后续步骤"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "检测到新版本 APK 链接！"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "$CURRENT_URL" > .last_apk_url
+          fi
+
+      - name: 提交链接记录更新
+        if: steps.check.outputs.changed == 'true'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .last_apk_url
+          VERSION="${{ steps.scrape.outputs.version }}"
+          MSG="chore: update last APK link"
+          [ -n "$VERSION" ] && MSG="$MSG (WeChat $VERSION)"
+          git commit -m "$MSG [skip ci]"
+          git push
+
+      - name: 触发 Hook 配置提取工作流
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          APK_URL="${{ steps.scrape.outputs.apk_url }}"
+          VERSION="${{ steps.scrape.outputs.version }}"
+
+          echo "========================================"
+          echo "  触发 Hook 配置提取"
+          echo "  APK: $APK_URL"
+          [ -n "$VERSION" ] && echo "  版本: $VERSION"
+          echo "========================================"
+
+          ARGS="-f apk_url=$APK_URL"
+          [ -n "$VERSION" ] && ARGS="$ARGS -f version=$VERSION"
+
+          gh workflow run "提取微信 Hook 配置" \
+            --ref master \
+            $ARGS
+
+          echo "已触发提取工作流！"
