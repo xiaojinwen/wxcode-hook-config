@@ -1,32 +1,41 @@
 # 微信 Hook 配置提取工具
 
-从微信 APK 自动提取小程序登录 Hook 配置项（`j1`, `c`, `a1`, `a7`）。
+从微信 APK 自动提取小程序登录 Hook 配置项（`j1`, `c`, `a1`, `a7`），并支持**定时检查微信更新**，发现新版本后自动触发提取。
 
 ## 目录结构
 
 ```
 wxcode_hook_config/
 ├── .github/workflows/
-│   ├── extract-hook-config.yml  # 主 workflow: 提取配置
-│   └── upload-apk.yml           # 辅助: 上传 APK 后触发提取
+│   ├── check-wechat-update.yml   # 定时检查更新 workflow
+│   └── extract-hook-config.yml   # 提取 Hook 配置 workflow
 ├── scripts/
-│   └── extract_hook_config.py   # 核心提取脚本（CI 适配）
+│   └── extract_hook_config.py    # 核心提取脚本（CI 适配）
 ├── config/
-│   ├── known_configs.json       # 已知版本配置表
-│   └── hook_config_*.json       # CI 生成的单版本配置
-└── README.md
+│   ├── known_configs.json        # 已知版本配置表
+│   └── hook_config_*.json        # CI 生成的单版本配置
+├── .last_apk_url                 # 上次成功提取的 APK 链接记录
+├── README.md
+└── README.en.md
 ```
 
 ## 使用方式
 
 ### 方式一：GitHub Actions（推荐）
 
-**手动触发：**
+**手动触发提取：**
 1. 打开 Actions → `提取微信 Hook 配置` → `Run workflow`
 2. 填写版本号（如 `8.0.76`）和 APK 下载链接
 3. 运行完成后下载 `hook-config-xxx` artifact
 
-**上传 APK 自动触发：**
+**自动检测更新（定时任务）：**
+- 每天 UTC 2:00（北京时间 10:00），`check-wechat-update` workflow 自动运行
+- 抓取 [微信 Android 更新页面](https://weixin.qq.com/updates?platform=android)
+- 定位到「下载最新版本」链接，提取 APK 直链和版本号
+- 与上次提取过的链接对比，如有新版本则自动触发 `提取微信 Hook 配置` workflow
+- 提取成功后更新 `.last_apk_url` 记录，避免重复提取
+
+**直接上传 APK 触发：**
 1. 打开 Actions → `上传微信 APK` → `Run workflow`
 2. 填写 APK 下载链接
 3. 自动触发配置提取 workflow
@@ -45,11 +54,23 @@ python scripts/extract_hook_config.py wx-8.0.76.apk 8.0.76 --dex-fallback
 
 # 保存到指定文件
 python scripts/extract_hook_config.py wx-8.0.76.apk 8.0.76 --fast -o output/hook_config_8.0.76.json
+
+# 自动检测 APK 版本号
+python scripts/extract_hook_config.py wx-8.0.76.apk --detect-version
 ```
 
 ## 输出格式
 
 生成的配置 JSON 会保存在 `config/` 目录下（如 `config/hook_config_8.0.76.json`），与 `known_configs.json` 放在一起。
+
+```json
+{
+  "j1": "hm0.j1",
+  "c": "cl0.c",
+  "a1": "plugin.appbrand.jsapi.auth.i2",
+  "a7": "plugin.appbrand.jsapi.auth.m2"
+}
+```
 
 ## 配置项说明
 
@@ -120,13 +141,27 @@ git push
 
 ### GitHub Actions
 
-位于 `.github/workflows/`，运行时自动：
-1. 安装 Python 3.11 + Java 17
-2. 下载 jadx 1.5.5
-3. 从 URL 或 artifacts 获取 APK
-4. 快速反编译目标包（仅 30 秒）
-5. 提取配置并上传为 artifact
+位于 `.github/workflows/`，包含两个 workflow：
+
+**1. `check-wechat-update.yml` — 定时检查微信更新**
+- 触发：每天 UTC 2:00（北京时间 10:00）+ 手动触发
+- 抓取微信官方更新页面，提取「下载最新版本」链接
+- 与 `.last_apk_url` 对比，检测到新版本时自动触发提取 workflow
+- 提取成功后更新 `.last_apk_url` 记录并提交到仓库
+
+**2. `extract-hook-config.yml` — 提取 Hook 配置**
+- 触发：手动触发 / 被 check-wechat-update 调用
+- 运行时自动：
+  1. 安装 Python 3.11 + Java 17
+  2. 下载 jadx 1.5.5
+  3. 从 URL 或 artifacts 获取 APK
+  4. 快速反编译目标包（仅 30 秒）
+  5. 提取配置并上传为 artifact
 
 ### Gitee CI
 
 位于 `.gitee/workflows/`，使用 Gitee 流水线格式，功能与 GitHub Actions 一致。
+
+## 许可证
+
+本项目基于 [MIT](LICENSE) 许可证开源。
