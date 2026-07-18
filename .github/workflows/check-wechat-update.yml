@@ -73,27 +73,48 @@ jobs:
 
           page = html.unescape(page)
 
-          # 提取所有 .apk 下载链接
-          apk_urls = re.findall(r'https://[^"\'> ]+\.apk', page)
-
-          if not apk_urls:
-              # 尝试从其他 URL 格式提取
-              apk_urls = re.findall(r'https://[^"\'> ]*wechat[^"\'> ]*\.apk', page, re.I)
-
-          if not apk_urls:
-              print("::warning::未找到 APK 链接，将尝试用最新已知版本")
-              apk_url = ""
+          # 策略：优先提取 "下载最新版本" 链接文字对应的 href
+          apk_url = ""
+          m = re.search(r'<a[^>]*href=["\'](https://[^"\'>]+?\.apk)["\'][^>]*>\s*下载最新版本\s*</a>', page, re.I)
+          if m:
+              apk_url = m.group(1)
+              print(f"从「下载最新版本」链接提取到 APK: {apk_url}")
           else:
-              # 优先 arm64
-              arm64_urls = [u for u in apk_urls if "arm64" in u]
-              apk_url = arm64_urls[0] if arm64_urls else apk_urls[0]
+              # 容错：尝试换种顺序 attribute 可能在 text 之后
+              m = re.search(r'<a[^>]*>\s*下载最新版本\s*</a>', page, re.I)
+              if m:
+                  # 往前找最近的 href
+                  before = page[:m.start()]
+                  href_m = re.findall(r'href=["\'](https://[^"\'>]+?\.apk)["\']', before)
+                  if href_m:
+                      apk_url = href_m[-1]
+                      print(f"从「下载最新版本」附近提取到 APK: {apk_url}")
+
+          if not apk_url:
+              # 最终容错：提取所有 .apk 链接，优先 arm64
+              apk_urls = re.findall(r'https://[^"\'> ]+\.apk', page)
+              if apk_urls:
+                  arm64_urls = [u for u in apk_urls if "arm64" in u]
+                  apk_url = arm64_urls[0] if arm64_urls else apk_urls[0]
+                  print(f"::warning::未找到「下载最新版本」链接，退而使用: {apk_url}")
+              else:
+                  print("::warning::未找到任何 APK 链接")
+
+          if not apk_url:
+              print("::warning::无法获取 APK 链接，将用空值跳过")
+          else:
               print(f"APK: {apk_url}")
 
           # 提取版本号
           version = ""
-          m = re.search(r'Android\D*(\d+\.\d+\.\d+)', page)
+          # 优先从 "发布版本： 微信 X.X.X" 提取
+          m = re.search(r'发布版本[：:]\s*微信\s*(\d+\.\d+\.\d+)', page)
           if m:
               version = m.group(1)
+          if not version:
+              m = re.search(r'Android\D*(\d+\.\d+\.\d+)', page)
+              if m:
+                  version = m.group(1)
           if not version and apk_url:
               m = re.search(r'(\d+\.\d+\.\d+)', apk_url)
               if m:
