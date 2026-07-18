@@ -78,11 +78,55 @@ python scripts/extract_hook_config.py wx-8.0.76.apk 8.0.76 --fast -o output/hook
 > - i2 → 新的 a1（单参 o2 回调，`new i2(this)`）
 > - m2 → 新的 a7（双参回调，`new m2(this, o2)`）
 
+## 多平台同步
+
+本仓库同时支持 **Gitee** 和 **GitHub** 双平台提交和 CI。
+
+### 远程仓库配置
+
+| 远程名 | 地址 |
+|--------|------|
+| `origin` | GitHub: `https://github.com/xiaojinwen/wxcode-hook-config.git` |
+| `gitee` | Gitee: `https://gitee.com/xiaojinwen/wxcode-hook-config.git` |
+
+`origin` 已配置两个 `pushurl`，直接 `git push` 会自动同时推送到 GitHub 和 Gitee。
+
+### 一键同步脚本
+
+```bash
+# 批处理（Windows CMD）
+scripts\sync-to-both.bat
+
+# PowerShell（Windows / Linux / macOS）
+pwsh scripts/sync-to-both.ps1
+```
+
+脚本会依次推送到 GitHub 和 Gitee，任一失败不影响另一平台，适合网络不稳定场景。
+
+### 手动操作
+
+```bash
+# 推送当前分支到两个平台
+git push origin master
+git push gitee master
+
+# 或者直接 git push（利用 pushurl 自动双发：GitHub → Gitee）
+git push
+```
+
+> ⚠ **首次推送前**，请确保 GitHub 仓库 `xiaojinwen/wxcode-hook-config` 已创建且有推送权限。
+
 ## CI 环境
 
-GitHub Actions 运行时会自动：
+### GitHub Actions
+
+位于 `.github/workflows/`，运行时自动：
 1. 安装 Python 3.11 + Java 17
 2. 下载 jadx 1.5.5
 3. 从 URL 或 artifacts 获取 APK
 4. 快速反编译目标包（仅 30 秒）
 5. 提取配置并上传为 artifact
+
+### Gitee CI
+
+位于 `.gitee/workflows/`，使用 Gitee 流水线格式，功能与 GitHub Actions 一致。
