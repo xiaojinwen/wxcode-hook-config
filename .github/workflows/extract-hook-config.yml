@@ -18,12 +18,6 @@ on:
         default: true
         type: boolean
 
-  # 上传 APK 后自动触发
-  workflow_run:
-    workflows: ["上传微信 APK"]
-    types:
-      - completed
-
 permissions:
   contents: read
   actions: write
@@ -69,6 +63,13 @@ jobs:
             echo "apk_path=apk_input/$FILENAME" >> $GITHUB_OUTPUT
             echo "下载完成: $FILENAME"
 
+            # 从文件名推断版本号（备用）
+            INFERRED=$(echo "$FILENAME" | grep -oP '\d+\.\d+\.\d+' || echo "")
+            if [ -n "$INFERRED" ]; then
+              echo "inferred_version=$INFERRED" >> $GITHUB_OUTPUT
+              echo "文件名识别版本: $INFERRED"
+            fi
+
           # ----- 方式2：上传 APK 后联动触发 -----
           elif [ "${{ github.event_name }}" = "workflow_run" ]; then
             echo "从 artifacts 获取 APK ..."
@@ -96,9 +97,11 @@ jobs:
           CMD="python scripts/extract_hook_config.py"
           CMD="$CMD \"$APK_PATH\""
 
-          # 版本号：优先用户输入，否则从 APK 内部读取
+          # 版本号：优先用户输入 > APK 内部识别 > 文件名推断 > unknown
           if [ -n "${{ inputs.version }}" ]; then
             CMD="$CMD \"${{ inputs.version }}\""
+          elif [ -n "${{ steps.get_apk.outputs.inferred_version }}" ]; then
+            CMD="$CMD \"${{ steps.get_apk.outputs.inferred_version }}\""
           else
             CMD="$CMD --detect-version"
           fi
