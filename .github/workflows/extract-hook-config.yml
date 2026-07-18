@@ -1,0 +1,131 @@
+name: 提取微信 Hook 配置
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '微信版本号（留空则从文件名自动识别）'
+        required: false
+        type: string
+      apk_url:
+        description: 'APK 下载直链'
+        required: true
+        type: string
+      fast_mode:
+        description: '快速模式（仅反编目标包，30 秒完成）'
+        required: false
+        default: true
+        type: boolean
+
+  # 上传 APK 后自动触发
+  workflow_run:
+    workflows: ["上传微信 APK"]
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  extract:
+    name: 提取 Hook 配置
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖（aapt + Java）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq aapt
+        shell: bash
+
+      - name: 设置 Java（jadx 依赖）
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: 获取 APK
+        id: get_apk
+        shell: bash
+        run: |
+          mkdir -p apk_input
+
+          # ----- 方式1：手动触发，从 URL 下载（保留原始文件名）-----
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            cd apk_input
+            FILENAME=$(basename "${{ inputs.apk_url }}" | sed 's/?.*//')
+            [ -z "$FILENAME" ] && FILENAME="wechat.apk"
+            curl -L -o "$FILENAME" "${{ inputs.apk_url }}"
+            echo "apk_path=apk_input/$FILENAME" >> $GITHUB_OUTPUT
+            echo "下载完成: $FILENAME"
+
+          # ----- 方式2：上传 APK 后联动触发 -----
+          elif [ "${{ github.event_name }}" = "workflow_run" ]; then
+            echo "从 artifacts 获取 APK ..."
+            gh run download "${{ github.event.workflow_run.id }}" \
+              --name wechat-apk --dir apk_input
+            APK_FILE=$(ls apk_input/*.apk 2>/dev/null | head -1)
+            if [ -z "$APK_FILE" ]; then
+              echo "错误: artifacts 中未找到 APK"
+              exit 1
+            fi
+            echo "apk_path=$APK_FILE" >> $GITHUB_OUTPUT
+            echo "获取完成: $(basename $APK_FILE)"
+          fi
+
+      - name: 提取 Hook 配置
+        id: extract
+        shell: bash
+        env:
+          JADX_HOME: ${{ github.workspace }}/tools/jadx
+        run: |
+          APK_PATH="${{ steps.get_apk.outputs.apk_path }}"
+          chmod +x scripts/extract_hook_config.py
+
+          # 组装命令
+          CMD="python scripts/extract_hook_config.py"
+          CMD="$CMD \"$APK_PATH\""
+
+          # 版本号：优先用户输入，否则从 APK 内部读取
+          if [ -n "${{ inputs.version }}" ]; then
+            CMD="$CMD \"${{ inputs.version }}\""
+          else
+            CMD="$CMD --detect-version"
+          fi
+
+          CMD="$CMD --ci"
+          if [ "${{ inputs.fast_mode }}" != "false" ]; then
+            CMD="$CMD --fast"
+          fi
+          CMD="$CMD --verbose"
+          CMD="$CMD --output \"config/hook_config_$(date +%s).json\""
+
+          echo "运行: $CMD"
+          eval $CMD
+
+      - name: 上传提取结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: hook-config
+          path: config/hook_config_*.json
+          retention-days: 90
+
+      - name: 输出配置摘要
+        shell: bash
+        run: |
+          echo ""
+          echo "========================================="
+          echo "  Hook 配置提取完成"
+          echo "========================================="
+          ls -la config/hook_config_*.json 2>/dev/null || echo "(config 目录无新文件)"
+          echo "========================================="

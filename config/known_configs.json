@@ -1,0 +1,59 @@
+{
+  "_comment": "微信 Hook 配置已知版本表",
+  "_fields": {
+    "j1": "任务提交器（有 d().g() 链式调用）",
+    "c": "参数类（构造函数 8 参数）",
+    "a1": "单参回调: new XX(this)，实现 o2 接口",
+    "a7": "双参回调: new XX(this, callback)"
+  },
+  "versions": {
+    "8.0.49": {
+      "j1": "u70.k1",
+      "c": "o60.c",
+      "a1": "plugin.appbrand.jsapi.auth.b2",
+      "a7": "plugin.appbrand.jsapi.auth.f2",
+      "j1_instance_method": "f"
+    },
+    "8.0.62": {
+      "j1": "of0.j1",
+      "c": "he0.c",
+      "a1": "plugin.appbrand.jsapi.auth.h2",
+      "a7": "plugin.appbrand.jsapi.auth.l2"
+    },
+    "8.0.70": {
+      "j1": "yj0.j1",
+      "c": "ti0.c",
+      "a1": "plugin.appbrand.jsapi.auth.h2",
+      "a7": "plugin.appbrand.jsapi.auth.l2"
+    },
+    "8.0.71": {
+      "j1": "tk0.j1",
+      "c": "oj0.c",
+      "a1": "plugin.appbrand.jsapi.auth.h2",
+      "a7": "plugin.appbrand.jsapi.auth.l2"
+    },
+    "8.0.72": {
+      "j1": "dl0.k1",
+      "c": "yj0.c",
+      "a1": "plugin.appbrand.jsapi.auth.h2",
+      "a7": "plugin.appbrand.jsapi.auth.l2"
+    },
+    "8.0.74": {
+      "j1": "gm0.j1",
+      "c": "bl0.c",
+      "a1": "plugin.appbrand.jsapi.auth.h2",
+      "a7": "plugin.appbrand.jsapi.auth.l2"
+    },
+    "8.0.76": {
+      "j1": "hm0.j1",
+      "c": "cl0.c",
+      "a1": "plugin.appbrand.jsapi.auth.i2",
+      "a7": "plugin.appbrand.jsapi.auth.m2",
+      "_note": "8.0.76 混淆位移: h2->i2(a1), l2->m2(a7)"
+    }
+  },
+  "common": {
+    "j1_static_method": "d",
+    "j1_instance_method": "g"
+  }
+}
