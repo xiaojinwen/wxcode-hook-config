@@ -22,64 +22,83 @@ jobs:
 
       - name: 抓取微信更新页面并提取 APK 链接
         id: scrape
-        shell: python
+        shell: bash
         run: |
-          import os, re, urllib.request, html
+          set -e
 
-          PAGE_URL = "https://weixin.qq.com/updates?platform=android"
-          print(f"抓取页面: {PAGE_URL}")
-
-          req = urllib.request.Request(
-            PAGE_URL,
-            headers={"User-Agent": "Mozilla/5.0 (compatible; GitHubActions/1.0)"},
+          # 备选 URL 列表（按优先级排序）
+          PAGE_URLS=(
+            "https://weixin.qq.com/updates?platform=android"
           )
-          with urllib.request.urlopen(req, timeout=30) as resp:
-            page_html = resp.read().decode("utf-8", errors="replace")
 
-          # 解码 HTML 实体（如 &amp;）
-          page_html = html.unescape(page_html)
+          mkdir -p /tmp/wxscrape
+          PAGE_FILE="/tmp/wxscrape/page.html"
+          FOUND=false
 
-          # === 提取所有 .apk 下载链接 ===
-          apk_urls = re.findall(r'https://[^"\'<> ]+\.apk', page_html)
+          for url in "${PAGE_URLS[@]}"; do
+            echo "尝试抓取: $url"
+            if curl -sL --max-time 15 --retry 3 --retry-delay 5 \
+              -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+              -o "$PAGE_FILE" \
+              "$url" 2>/dev/null; then
+              if [ -s "$PAGE_FILE" ]; then
+                echo "成功获取页面: $url"
+                FOUND=true
+                break
+              fi
+            fi
+            echo "页面 $url 不可达，尝试下一个..."
+          done
 
-          if not apk_urls:
-            print("::error::未找到任何 APK 下载链接")
-            exit(1)
+          if [ "$FOUND" = false ]; then
+            echo "::error::所有备选页面均不可达，跳过本轮检查"
+            echo "apk_url=" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-          # 优先选择 arm64 版本
-          arm64_urls = [u for u in apk_urls if "arm64" in u]
-          if arm64_urls:
-            apk_url = arm64_urls[0]
-            print(f"找到 64 位 APK: {apk_url}")
-          else:
-            apk_url = apk_urls[0]
-            print(f"找到 APK（32位）: {apk_url}")
+          # 用 Python 解析 HTML 提取 APK 链接和版本号
+          python3 << 'PYEOF'
+import os, re, html
 
-          # 输出 APK 链接
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-            f.write(f"apk_url={apk_url}\n")
+with open("/tmp/wxscrape/page.html", "r", encoding="utf-8", errors="replace") as f:
+    page = f.read()
 
-          # === 提取版本号 ===
-          version = ""
+page = html.unescape(page)
 
-          # 方式1：从页面文本找 "Android X.Y.Z"
-          m = re.search(r'Android\D*(\d+\.\d+\.\d+)', page_html)
-          if m:
-            version = m.group(1)
+# 提取所有 .apk 下载链接
+apk_urls = re.findall(r'https://[^"\'<> ]+\.apk', page)
 
-          # 方式2：从 APK 文件名提取
-          if not version:
-            m = re.search(r'(\d+\.\d+\.\d+)', apk_url)
-            if m:
-              version = m.group(1)
+if not apk_urls:
+    # 尝试从其他 URL 格式提取
+    apk_urls = re.findall(r'https://[^"\'<> ]*wechat[^"\'<> ]*\.apk', page, re.I)
 
-          if version:
-            print(f"识别版本号: {version}")
-          else:
-            print("未识别到版本号，将由提取脚本自动检测")
+if not apk_urls:
+    print("::warning::未找到 APK 链接，将尝试用最新已知版本")
+    apk_url = ""
+else:
+    # 优先 arm64
+    arm64_urls = [u for u in apk_urls if "arm64" in u]
+    apk_url = arm64_urls[0] if arm64_urls else apk_urls[0]
+    print(f"APK: {apk_url}")
 
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-            f.write(f"version={version}\n")
+# 提取版本号
+version = ""
+m = re.search(r'Android\D*(\d+\.\d+\.\d+)', page)
+if m:
+    version = m.group(1)
+if not version and apk_url:
+    m = re.search(r'(\d+\.\d+\.\d+)', apk_url)
+    if m:
+        version = m.group(1)
+
+print(f"版本号: {version if version else '未知'}")
+
+with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+    f.write(f"apk_url={apk_url}\n")
+    f.write(f"version={version}\n")
+PYEOF
 
       - name: 检查链接是否与上次提取过的一致
         id: check
@@ -136,11 +155,11 @@ jobs:
           # 等待下游工作流完成（最多等 30 分钟）
           echo "等待提取工作流完成..."
           if gh run watch "$RUN_ID" --exit-status --interval 30 2>&1; then
-            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion -q '.conclusion')
+            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion')
             echo "提取工作流完成，结论: $CONCLUSION"
             echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
           else
-            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion -q '.conclusion')
+            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion')
             echo "提取工作流未通过，结论: $CONCLUSION"
             echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
           fi

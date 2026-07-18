@@ -45,7 +45,7 @@ jobs:
       - name: 安装依赖（aapt + Java）
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq aapt
+          sudo apt-get install -y -qq --no-install-recommends aapt
         shell: bash
 
       - name: 设置 Java（jadx 依赖）
@@ -65,7 +65,7 @@ jobs:
             cd apk_input
             FILENAME=$(basename "${{ inputs.apk_url }}" | sed 's/?.*//')
             [ -z "$FILENAME" ] && FILENAME="wechat.apk"
-            curl -L -o "$FILENAME" "${{ inputs.apk_url }}"
+            curl -L --retry 3 --retry-delay 10 -o "$FILENAME" "${{ inputs.apk_url }}"
             echo "apk_path=apk_input/$FILENAME" >> $GITHUB_OUTPUT
             echo "下载完成: $FILENAME"
 
