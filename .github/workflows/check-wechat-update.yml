@@ -6,6 +6,12 @@ on:
     - cron: '0 2 * * *'
   # 也支持手动触发
   workflow_dispatch:
+    inputs:
+      run_extract:
+        description: '是否执行提取工作流（默认提取，可手动关闭）'
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: write
@@ -124,12 +130,14 @@ jobs:
           fi
 
       - name: 触发 Hook 配置提取并等待完成
-        if: steps.check.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_extract == true)
         id: trigger
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -e -o pipefail
+
           APK_URL="${{ steps.scrape.outputs.apk_url }}"
           VERSION="${{ steps.scrape.outputs.version }}"
 
@@ -142,25 +150,40 @@ jobs:
           ARGS="-f apk_url=$APK_URL"
           [ -n "$VERSION" ] && ARGS="$ARGS -f version=$VERSION"
 
-          # 触发下游工作流，获取 run ID
-          RUN_ID=$(gh workflow run "提取微信 Hook 配置" \
+          # 触发下游工作流，保存原始输出（不依赖 --json / --jq）
+          RUN_OUTPUT=$(gh workflow run "提取微信 Hook 配置" \
             --ref master \
-            $ARGS 2>&1 | grep -oP 'run \K\d+')
+            $ARGS 2>&1)
+          echo "gh 输出: $RUN_OUTPUT"
+
+          # 从输出文本中提取 run ID（兼容中英文输出）
+          RUN_ID=$(echo "$RUN_OUTPUT" | grep -oP '\d{7,}' | head -1)
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::无法解析 Run ID，触发可能失败"
+            exit 1
+          fi
 
           echo "触发完成，Run ID: $RUN_ID"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
 
           # 等待下游工作流完成（最多等 30 分钟）
           echo "等待提取工作流完成..."
-          if gh run watch "$RUN_ID" --exit-status --interval 30 2>&1; then
-            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['conclusion'])" 2>/dev/null || echo "success")
-            echo "提取工作流完成，结论: $CONCLUSION"
-            echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
+          set +e
+          gh run watch "$RUN_ID" --exit-status --interval 30 2>&1
+          WATCH_EXIT=$?
+          set -e
+
+          if [ $WATCH_EXIT -eq 0 ]; then
+            CONCLUSION="success"
           else
-            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['conclusion'])" 2>/dev/null || echo "failure")
+            # 尝试多种方式获取结论（兼容新版旧版 gh）
+            CONCLUSION=$(gh run view "$RUN_ID" 2>/dev/null | grep -oiE '(success|failure|cancelled|skipped)' | head -1 || echo "")
+            if [ -z "$CONCLUSION" ]; then
+              CONCLUSION=$(gh run view "$RUN_ID" --json conclusion 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['conclusion'])" 2>/dev/null || echo "failure")
+            fi
             echo "提取工作流未通过，结论: $CONCLUSION"
-            echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
           fi
+          echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
 
       - name: 提取成功后更新链接记录
         if: steps.trigger.outputs.conclusion == 'success'
