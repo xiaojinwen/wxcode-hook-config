@@ -1,0 +1,63 @@
+name: 上传微信 APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      apk_url:
+        description: 'APK 下载链接'
+        required: true
+        type: string
+      version:
+        description: '微信版本号（留空则从文件名自动识别）'
+        required: false
+        type: string
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 下载并保留原始文件名
+        run: |
+          mkdir -p apk_upload
+          cd apk_upload
+          # 从 URL 提取原始文件名，保留版本信息
+          FILENAME=$(basename "${{ inputs.apk_url }}" | sed 's/?.*//' | sed 's/%20/ /g')
+          if [ -z "$FILENAME" ]; then
+            FILENAME="wechat.apk"
+          fi
+          echo "原始文件名: $FILENAME"
+          curl -L -o "$FILENAME" "${{ inputs.apk_url }}"
+          echo "saved_filename=$FILENAME" >> $GITHUB_ENV
+
+      - name: 安装 aapt（用于从 APK 读版本号）
+        run: sudo apt-get install -y -qq aapt
+        shell: bash
+
+      - name: 自动识别版本（如未填写）
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            # 优先从 APK 内部读
+            APK_FILE=$(ls apk_upload/*.apk | head -1)
+            VERSION=$(aapt dump badging "$APK_FILE" 2>/dev/null \
+              | grep "versionName" \
+              | sed "s/.*versionName='\([^']*\)'.*/\1/")
+            if [ -n "$VERSION" ]; then
+              echo "从 APK 内部识别版本: $VERSION"
+            else
+              # 回退：从文件名识别
+              INFERRED=$(echo "$saved_filename" | grep -oP '\d+\.\d+\.\d+' || echo "")
+              if [ -n "$INFERRED" ]; then
+                VERSION="$INFERRED"
+                echo "从文件名识别版本: $VERSION"
+              fi
+            fi
+          fi
+          echo "version=$VERSION" >> $GITHUB_ENV
+
+      - name: 上传 APK（保留原始文件名）
+        uses: actions/upload-artifact@v4
+        with:
+          name: wechat-apk
+          path: apk_upload/*.apk
+          retention-days: 1
