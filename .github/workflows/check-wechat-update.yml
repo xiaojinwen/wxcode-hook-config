@@ -145,9 +145,7 @@ jobs:
           # 触发下游工作流，获取 run ID
           RUN_ID=$(gh workflow run "提取微信 Hook 配置" \
             --ref master \
-            $ARGS \
-            --json id \
-            --jq '.id')
+            $ARGS 2>&1 | grep -oP 'run \K\d+')
 
           echo "触发完成，Run ID: $RUN_ID"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
@@ -155,11 +153,11 @@ jobs:
           # 等待下游工作流完成（最多等 30 分钟）
           echo "等待提取工作流完成..."
           if gh run watch "$RUN_ID" --exit-status --interval 30 2>&1; then
-            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion')
+            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['conclusion'])" 2>/dev/null || echo "success")
             echo "提取工作流完成，结论: $CONCLUSION"
             echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
           else
-            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion --jq '.conclusion')
+            CONCLUSION=$(gh run view "$RUN_ID" --json conclusion 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin)['conclusion'])" 2>/dev/null || echo "failure")
             echo "提取工作流未通过，结论: $CONCLUSION"
             echo "conclusion=$CONCLUSION" >> "$GITHUB_OUTPUT"
           fi
